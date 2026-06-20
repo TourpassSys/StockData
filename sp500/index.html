@@ -162,6 +162,24 @@ main { display: flex; flex: 1; overflow: hidden; }
   padding: 8px 16px; display: none; align-items: center; gap: 10px; flex-wrap: wrap;
 }
 .seq-panel.visible { display: flex; }
+
+/* 지표 바 */
+.indicator-bar {
+  background: #141624; border-bottom: 1px solid #2a2d3e;
+  padding: 6px 16px; display: none; align-items: center; gap: 6px; flex-wrap: wrap;
+}
+.indicator-bar.visible { display: flex; }
+.ind-label { font-size: 11px; color: #555; margin-right: 4px; }
+.ind-chip {
+  display: inline-flex; align-items: center; gap: 5px;
+  padding: 3px 9px; border-radius: 12px; cursor: pointer;
+  border: 1px solid transparent; font-size: 11px; font-weight: 600;
+  color: #777; background: #1a1d2e; transition: all .15s;
+  user-select: none;
+}
+.ind-chip .ind-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+.ind-chip:hover { border-color: #444; color: #aaa; }
+.ind-chip.active { background: #22253a; border-color: var(--ind-color); color: #e0e0e0; }
 .seq-label { font-size: 12px; color: #666; }
 .seq-info  { font-size: 12px; color: #a78bfa; font-weight: 600; }
 .seq-slider { flex: 1; min-width: 120px; max-width: 360px; accent-color: #7c3aed; }
@@ -253,6 +271,9 @@ main { display: flex; flex: 1; overflow: hidden; }
       <button class="btn evt-marker-toggle" id="evt-toggle-btn" onclick="toggleEventPanel()" title="외부요인 이벤트 패널">📋 이벤트</button>
     </div>
 
+    <!-- 지표 바 -->
+    <div class="indicator-bar" id="indicator-bar"></div>
+
     <!-- 시퀀스 패널 -->
     <div class="seq-panel" id="seq-panel">
       <span class="seq-label">시퀀스 (100-step):</span>
@@ -308,6 +329,93 @@ let eventMarkers    = {};   // { 'YYYY-MM-DD': { impact, count, sentiment, categ
 let eventCache      = {};   // { 'TICKER|YYYY-MM-DD': [...events] }
 let lastEventDate   = null;
 let eventFetchTimer = null;
+
+// ── 지표 ──
+let rawCandles = [];  // {time, open, high, low, close}
+let rawVolumes = [];  // volume 배열 (rawCandles와 동일 인덱스)
+
+const IND_DEFS = [
+  { key: 'ma5',   label: 'MA5',    color: '#3b82f6', type: 'ma',   period: 5   },
+  { key: 'ma20',  label: 'MA20',   color: '#f59e0b', type: 'ma',   period: 20  },
+  { key: 'ma60',  label: 'MA60',   color: '#10b981', type: 'ma',   period: 60  },
+  { key: 'ma120', label: 'MA120',  color: '#8b5cf6', type: 'ma',   period: 120 },
+  { key: 'ma200', label: 'MA200',  color: '#ef4444', type: 'ma',   period: 200 },
+  { key: 'vwap',  label: 'VWAP20', color: '#06b6d4', type: 'vwap', period: 20  },
+];
+const indState = {};   // key → { series, enabled }
+
+function calcMA(period) {
+  const out = [];
+  for (let i = period - 1; i < rawCandles.length; i++) {
+    let s = 0;
+    for (let j = i - period + 1; j <= i; j++) s += rawCandles[j].close;
+    out.push({ time: rawCandles[i].time, value: s / period });
+  }
+  return out;
+}
+
+function calcVWAP(period) {
+  const out = [];
+  for (let i = period - 1; i < rawCandles.length; i++) {
+    let tv = 0, v = 0;
+    for (let j = i - period + 1; j <= i; j++) {
+      const tp = (rawCandles[j].high + rawCandles[j].low + rawCandles[j].close) / 3;
+      tv += tp * rawVolumes[j];
+      v  += rawVolumes[j];
+    }
+    if (v > 0) out.push({ time: rawCandles[i].time, value: tv / v });
+  }
+  return out;
+}
+
+function buildIndicatorBar() {
+  const bar = document.getElementById('indicator-bar');
+  bar.innerHTML = '<span class="ind-label">지표</span>';
+  IND_DEFS.forEach(def => {
+    if (!indState[def.key]) indState[def.key] = { series: null, enabled: false };
+    const chip = document.createElement('span');
+    chip.className = 'ind-chip';
+    chip.id = `ind-chip-${def.key}`;
+    chip.style.setProperty('--ind-color', def.color);
+    chip.innerHTML = `<span class="ind-dot" style="background:${def.color}"></span>${def.label}`;
+    chip.onclick = () => toggleIndicator(def.key);
+    bar.appendChild(chip);
+  });
+}
+
+function toggleIndicator(key) {
+  const def  = IND_DEFS.find(d => d.key === key);
+  const st   = indState[key];
+  st.enabled = !st.enabled;
+
+  const chip = document.getElementById(`ind-chip-${key}`);
+  chip.classList.toggle('active', st.enabled);
+
+  if (st.enabled) {
+    if (!st.series) {
+      st.series = mainChart.addLineSeries({
+        color: def.color, lineWidth: 1,
+        priceLineVisible: false, lastValueVisible: false,
+        crosshairMarkerVisible: false,
+      });
+    }
+    const data = def.type === 'vwap' ? calcVWAP(def.period) : calcMA(def.period);
+    st.series.setData(data);
+    st.series.applyOptions({ visible: true });
+  } else if (st.series) {
+    st.series.applyOptions({ visible: false });
+  }
+}
+
+function refreshIndicators() {
+  IND_DEFS.forEach(def => {
+    const st = indState[def.key];
+    if (st && st.enabled && st.series) {
+      const data = def.type === 'vwap' ? calcVWAP(def.period) : calcMA(def.period);
+      st.series.setData(data);
+    }
+  });
+}
 
 // ── 차트 ──
 let mainChart, volChart, candleSeries, volumeSeries;
@@ -438,6 +546,9 @@ async function loadStock(ticker) {
       color: (d.close[i] >= d.open[i]) ? '#22c55e44' : '#ef444444',
     })).filter(v => v.value !== null);
 
+    rawCandles = candles;
+    rawVolumes = vols.map(v => v.value);
+
     candleSeries.setData(candles);
     volumeSeries.setData(vols);
 
@@ -453,6 +564,9 @@ async function loadStock(ticker) {
       mainChart.timeScale().fitContent();
       volChart.timeScale().fitContent();
     }
+
+    // 지표 업데이트
+    refreshIndicators();
 
     // 이벤트 마커 로드
     eventMarkers = {};
@@ -650,8 +764,9 @@ function setMode(mode, btn) {
     candleSeries && candleSeries.setMarkers([]);
   }
 
-  // 기간 버튼은 일봉 모드에서만 표시
+  // 기간 버튼 / 지표 바는 일봉 모드에서만 표시
   document.getElementById('period-btns').style.display = mode === 'daily' ? '' : 'none';
+  document.getElementById('indicator-bar').classList.toggle('visible', mode === 'daily');
 
   loadStock(currentTicker);
 }
@@ -794,7 +909,9 @@ window.addEventListener('resize', () => {
 // ── 초기화 ──
 async function init() {
   initCharts();
-  document.getElementById('period-btns').style.display = '';  // 기본 일봉 모드
+  buildIndicatorBar();
+  document.getElementById('period-btns').style.display = '';
+  document.getElementById('indicator-bar').classList.add('visible');  // 기본 일봉 모드
   await Promise.all([buildSearch(), buildSidebar()]);
   loadStock('AAPL');
 }
