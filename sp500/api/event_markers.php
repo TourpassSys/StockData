@@ -5,6 +5,10 @@
 require __DIR__ . '/_db.php';
 
 $DB_EVENTS = __DIR__ . '/../db/events.db';
+if (!file_exists($DB_EVENTS)) {
+    echo json_encode(['markers' => [], 'status' => 'db_not_ready']);
+    exit;
+}
 try {
     $edb = new PDO('sqlite:' . $DB_EVENTS);
     $edb->exec('PRAGMA journal_mode=WAL; PRAGMA cache_size=2000;');

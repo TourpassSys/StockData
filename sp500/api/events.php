@@ -6,13 +6,16 @@
 require __DIR__ . '/_db.php';
 
 $DB_EVENTS = __DIR__ . '/../db/events.db';
+if (!file_exists($DB_EVENTS)) {
+    echo json_encode(['events' => [], 'count' => 0, 'status' => 'db_not_ready']);
+    exit;
+}
 try {
     $edb = new PDO('sqlite:' . $DB_EVENTS);
     $edb->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
     $edb->exec('PRAGMA journal_mode=WAL; PRAGMA cache_size=4000;');
 } catch (Exception $e) {
-    http_response_code(503);
-    echo json_encode(['error' => 'events db unavailable']);
+    echo json_encode(['events' => [], 'count' => 0, 'status' => 'db_error']);
     exit;
 }
 
