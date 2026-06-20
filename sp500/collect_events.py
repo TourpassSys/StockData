@@ -16,10 +16,49 @@ import yfinance as yf
 
 BASE   = Path(__file__).parent
 DB_PATH      = BASE / "db" / "events.db"
-TICKERS_DB   = BASE / "db" / "stocks.db"
 CIK_MAP_PATH = BASE / "db" / "cik_map.json"
 
+# stocks.db 위치: tickers_list 테이블이 있는 DB 우선
+def _find_stocks_db():
+    import sqlite3 as _sq
+    candidates = [
+        BASE / "db" / "stocks.db",
+        BASE.parent.parent / "Virtual StockMarket" / "db" / "stocks.db",
+    ]
+    for p in candidates:
+        if not p.exists():
+            continue
+        try:
+            c = _sq.connect(p)
+            c.execute("SELECT 1 FROM tickers_list LIMIT 1")
+            c.close()
+            return p
+        except Exception:
+            pass
+    return candidates[0]
+
+TICKERS_DB = _find_stocks_db()
+
 EDGAR_HEADERS = {'User-Agent': 'StockDashboard/1.0 cuidacheng@gmail.com', 'Accept-Encoding': 'gzip'}
+
+# ── 링크 유효성 검사 ────────────────────────────────────────────────────────
+def check_url(url: str, timeout: int = 6) -> int:
+    """1=유효, 0=깨짐/오류"""
+    if not url:
+        return 0
+    try:
+        req = urllib.request.Request(url, method='HEAD',
+                                     headers={'User-Agent': 'Mozilla/5.0'})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return 1 if r.status < 400 else 0
+    except Exception:
+        # HEAD 안 되면 GET 시도
+        try:
+            req = urllib.request.Request(url, headers={'User-Agent': 'Mozilla/5.0'})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                return 1 if r.status < 400 else 0
+        except Exception:
+            return 0
 
 ITEM_MAP = {
     '2.02': ('EARNINGS',    4, '실적발표'),
@@ -51,6 +90,8 @@ def init_db(conn):
             impact     INTEGER DEFAULT 3,
             scope      TEXT DEFAULT 'MARKET',
             source     TEXT,
+            link_ok    INTEGER,          -- NULL=미확인 1=유효 0=깨짐
+            link_checked_at TEXT,
             created_at TEXT DEFAULT (datetime('now')),
             UNIQUE(ticker, date, title, source)
         );
@@ -175,9 +216,11 @@ def fetch_edgar_ticker(conn, ticker: str, cik: str, sector: str = None) -> int:
                                  'PRODUCT', 0, 2, 'STOCK', 'SEC/8-K'))
 
         if rows:
+            # SEC EDGAR URL은 영구 보존이므로 link_ok=1 바로 설정
+            rows_with_link = [r + (1 if r[6] else None, datetime.now().strftime('%Y-%m-%d') if r[6] else None) for r in rows]
             conn.executemany(
-                "INSERT OR IGNORE INTO events(ticker,sector,date,time,title,summary,url,category,sentiment,impact,scope,source) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
-                rows
+                "INSERT OR IGNORE INTO events(ticker,sector,date,time,title,summary,url,category,sentiment,impact,scope,source,link_ok,link_checked_at) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                rows_with_link
             )
             conn.commit()
         return len(rows)

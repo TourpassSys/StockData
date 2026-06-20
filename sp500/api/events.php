@@ -54,7 +54,8 @@ if ($category) {
 }
 
 $sql = 'SELECT id, ticker, sector, date, time, title, summary, url,
-               category, sentiment, impact, scope, source
+               category, sentiment, impact, scope, source,
+               link_ok, link_checked_at
         FROM events'
      . ($where ? ' WHERE ' . implode(' AND ', $where) : '')
      . ' ORDER BY date DESC, impact DESC, id DESC'
@@ -72,5 +73,7 @@ try {
 foreach ($rows as &$r) {
     $r['sentiment'] = (int)$r['sentiment'];
     $r['impact']    = (int)$r['impact'];
+    // link_ok: NULL=미확인, 1=유효, 0=깨짐
+    $r['link_ok']   = $r['link_ok'] === null ? null : (int)$r['link_ok'];
 }
 echo json_encode(['events' => array_values($rows), 'count' => count($rows)]);

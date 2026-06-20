@@ -4,7 +4,7 @@ header('Access-Control-Allow-Origin: *');
 header('Access-Control-Allow-Methods: GET, OPTIONS');
 if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') { http_response_code(204); exit; }
 
-$DB_PATH = __DIR__ . '/../db/stocks.db';
+$DB_PATH = __DIR__ . '/../db/merged_stocks.db';
 if (!file_exists($DB_PATH)) {
     http_response_code(503);
     echo json_encode(['error' => 'DB not found. Run convert_to_sqlite.py first.']);
