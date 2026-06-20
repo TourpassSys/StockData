@@ -28,38 +28,39 @@ if (!$from || !$to) {
 }
 
 // 날짜별 집계: 최대 impact, 대표 카테고리, 긍부정 집계
-if ($ticker) {
-    $sql = "SELECT date,
-                   MAX(impact) as max_impact,
-                   SUM(CASE WHEN sentiment > 0 THEN 1 ELSE 0 END) as pos,
-                   SUM(CASE WHEN sentiment < 0 THEN 1 ELSE 0 END) as neg,
-                   COUNT(*) as cnt,
-                   GROUP_CONCAT(DISTINCT category) as categories
-            FROM events
-            WHERE (ticker = ? OR scope = 'MARKET')
-              AND date >= ? AND date <= ?
-            GROUP BY date
-            ORDER BY date";
-    $st = $edb->prepare($sql);
-    $st->execute([$ticker, $from, $to]);
-} else {
-    $sql = "SELECT date,
-                   MAX(impact) as max_impact,
-                   SUM(CASE WHEN sentiment > 0 THEN 1 ELSE 0 END) as pos,
-                   SUM(CASE WHEN sentiment < 0 THEN 1 ELSE 0 END) as neg,
-                   COUNT(*) as cnt,
-                   GROUP_CONCAT(DISTINCT category) as categories
-            FROM events
-            WHERE scope = 'MARKET' AND date >= ? AND date <= ?
-            GROUP BY date ORDER BY date";
-    $st = $edb->prepare($sql);
-    $st->execute([$from, $to]);
+try {
+    if ($ticker) {
+        $sql = "SELECT date,
+                       MAX(impact) as max_impact,
+                       SUM(CASE WHEN sentiment > 0 THEN 1 ELSE 0 END) as pos,
+                       SUM(CASE WHEN sentiment < 0 THEN 1 ELSE 0 END) as neg,
+                       COUNT(*) as cnt,
+                       GROUP_CONCAT(DISTINCT category) as categories
+                FROM events
+                WHERE (ticker = ? OR scope = 'MARKET')
+                  AND date >= ? AND date <= ?
+                GROUP BY date ORDER BY date";
+        $st = $edb->prepare($sql);
+        $st->execute([$ticker, $from, $to]);
+    } else {
+        $sql = "SELECT date,
+                       MAX(impact) as max_impact,
+                       SUM(CASE WHEN sentiment > 0 THEN 1 ELSE 0 END) as pos,
+                       SUM(CASE WHEN sentiment < 0 THEN 1 ELSE 0 END) as neg,
+                       COUNT(*) as cnt,
+                       GROUP_CONCAT(DISTINCT category) as categories
+                FROM events
+                WHERE scope = 'MARKET' AND date >= ? AND date <= ?
+                GROUP BY date ORDER BY date";
+        $st = $edb->prepare($sql);
+        $st->execute([$from, $to]);
+    }
+    $rows_m = $st->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    echo json_encode(['markers' => [], 'status' => 'table_not_ready']); exit;
 }
 
 $markers = [];
-try { $rows_m = $st->fetchAll(PDO::FETCH_ASSOC); } catch (Exception $e) {
-    echo json_encode(['markers' => [], 'status' => 'table_not_ready']); exit;
-}
 foreach ($rows_m as $r) {
     $net = (int)$r['pos'] - (int)$r['neg'];
     $markers[$r['date']] = [
