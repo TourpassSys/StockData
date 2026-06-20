@@ -60,9 +60,14 @@ $sql = 'SELECT id, ticker, sector, date, time, title, summary, url,
      . ' ORDER BY date DESC, impact DESC, id DESC'
      . ' LIMIT ' . $limit;
 
-$st = $edb->prepare($sql);
-$st->execute($params);
-$rows = $st->fetchAll(PDO::FETCH_ASSOC);
+try {
+    $st = $edb->prepare($sql);
+    $st->execute($params);
+    $rows = $st->fetchAll(PDO::FETCH_ASSOC);
+} catch (Exception $e) {
+    echo json_encode(['events' => [], 'count' => 0, 'status' => 'table_not_ready']);
+    exit;
+}
 
 foreach ($rows as &$r) {
     $r['sentiment'] = (int)$r['sentiment'];

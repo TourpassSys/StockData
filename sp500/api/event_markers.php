@@ -57,7 +57,10 @@ if ($ticker) {
 }
 
 $markers = [];
-foreach ($st->fetchAll(PDO::FETCH_ASSOC) as $r) {
+try { $rows_m = $st->fetchAll(PDO::FETCH_ASSOC); } catch (Exception $e) {
+    echo json_encode(['markers' => [], 'status' => 'table_not_ready']); exit;
+}
+foreach ($rows_m as $r) {
     $net = (int)$r['pos'] - (int)$r['neg'];
     $markers[$r['date']] = [
         'impact'     => (int)$r['max_impact'],
