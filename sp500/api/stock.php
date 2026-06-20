@@ -15,7 +15,7 @@ $st->execute([$ticker]);
 if (!$st->fetch()) { http_response_code(404); echo json_encode(['error' => 'ticker not found']); exit; }
 
 if ($mode === 'daily') {
-    $st = $db->prepare("SELECT date AS ts, open, high, low, close, volume FROM daily WHERE ticker=? ORDER BY date");
+    $st = $db->prepare("SELECT date AS ts, open, high, low, close, volume FROM daily WHERE ticker=? AND open IS NOT NULL AND close IS NOT NULL ORDER BY date");
     $st->execute([$ticker]);
 } else {
     if ($seq !== null) {

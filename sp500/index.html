@@ -496,7 +496,23 @@ function initCharts() {
   mainChart = LightweightCharts.createChart(document.getElementById('chart'), {
     ...commonOpts,
     crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
-    timeScale: { borderColor: '#2a2d3e', timeVisible: true },
+    timeScale: {
+      borderColor: '#2a2d3e',
+      timeVisible: true,
+      tickMarkFormatter: (ts, tickMarkType, locale) => {
+        const d = new Date(ts * 1000);
+        if (currentMode === 'daily') {
+          // 틱 타입에 따라 연도/월/일 표시
+          if (tickMarkType <= 1) return String(d.getUTCFullYear());
+          if (tickMarkType === 2) return `${d.getUTCMonth()+1}월`;
+          return `${d.getUTCMonth()+1}/${d.getUTCDate()}`;
+        }
+        return d.toLocaleTimeString('ko-KR', { hour: '2-digit', minute: '2-digit' });
+      },
+    },
+    localization: {
+      timeFormatter: (ts) => fmtTs(ts, currentMode),
+    },
     width:  document.getElementById('chart').clientWidth,
     height: mainH,
   });
@@ -531,8 +547,7 @@ function initCharts() {
 
       // 일봉 + 이벤트 패널 열려있을 때 날짜별 이벤트 표시
       if (eventPanelOpen && currentMode === 'daily' && param.time) {
-        const dateStr = typeof param.time === 'string' ? param.time
-          : new Date(param.time * 1000).toISOString().slice(0, 10);
+        const dateStr = new Date(param.time * 1000).toISOString().slice(0, 10);
         if (dateStr !== lastEventDate) {
           lastEventDate = dateStr;
           clearTimeout(eventFetchTimer);
@@ -548,8 +563,19 @@ function initCharts() {
 }
 
 function timeVal(t, mode) {
-  if (mode === 'daily') return t;
+  if (mode === 'daily') {
+    // "YYYY-MM-DD" → UTC 자정 Unix timestamp (시간 스케일 충돌 방지)
+    return Math.floor(new Date(t + 'T00:00:00Z').getTime() / 1000);
+  }
   return Math.floor(new Date(t).getTime() / 1000);
+}
+
+function fmtTs(ts, mode) {
+  const d = new Date(ts * 1000);
+  if (mode === 'daily') {
+    return `${d.getUTCFullYear()}-${String(d.getUTCMonth()+1).padStart(2,'0')}-${String(d.getUTCDate()).padStart(2,'0')}`;
+  }
+  return d.toLocaleString('ko-KR', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
 async function loadStock(ticker) {
@@ -578,32 +604,33 @@ async function loadStock(ticker) {
     const res = await fetch(url);
     const d   = await res.json();
 
-    const candles = d.timestamps.map((t, i) => ({
-      time:  timeVal(t, apiMode),
-      open:  d.open[i],  high:  d.high[i],
-      low:   d.low[i],   close: d.close[i],
-    })).filter(c => c.open !== null && c.close !== null);
+    // null OHLCV(주말 행 등) 제거 후 candles/vols 동일 인덱스로 구성
+    const allRows = d.timestamps.map((t, i) => ({
+      ts:     timeVal(t, apiMode),
+      open:   d.open[i],   high:  d.high[i],
+      low:    d.low[i],    close: d.close[i],
+      volume: d.volume[i] ?? 0,
+    })).filter(r => r.open !== null && r.close !== null);
 
-    const vols = d.timestamps.map((t, i) => ({
-      time:  timeVal(t, apiMode),
-      value: d.volume[i] || 0,
-      color: (d.close[i] >= d.open[i]) ? '#22c55e44' : '#ef444444',
-    })).filter(v => v.value !== null);
+    const candles = allRows.map(r => ({ time: r.ts, open: r.open, high: r.high, low: r.low, close: r.close }));
+    const vols    = allRows.map(r => ({
+      time:  r.ts,
+      value: r.volume || 0,
+      color: (r.close >= r.open) ? '#22c55e44' : '#ef444444',
+    }));
 
     rawCandles = candles;
-    rawVolumes = vols.map(v => v.value);
+    rawVolumes = allRows.map(r => r.volume);
 
     candleSeries.setData(candles);
     volumeSeries.setData(vols);
 
     // 일봉: 기본 5년 뷰, 분봉/시퀀스: fitContent
     if (currentMode === 'daily' && candles.length > 0) {
-      const last = candles[candles.length - 1].time;
-      const d = new Date(last);
-      d.setFullYear(d.getFullYear() - 5);
-      const from = d.toISOString().slice(0, 10);
-      mainChart.timeScale().setVisibleRange({ from, to: last });
-      volChart.timeScale().setVisibleRange({ from, to: last });
+      const toTs   = candles[candles.length - 1].time;
+      const fromTs = toTs - 5 * 365.25 * 86400;
+      mainChart.timeScale().setVisibleRange({ from: fromTs, to: toTs });
+      volChart.timeScale().setVisibleRange({ from: fromTs, to: toTs });
     } else {
       mainChart.timeScale().fitContent();
       volChart.timeScale().fitContent();
@@ -806,12 +833,20 @@ function setMode(mode, btn) {
   seqPanel.classList.toggle('visible', mode === 'sequence');
   seqIdx = 0;
 
-  // 일봉이 아니면 마커/비교 제거
+  // 일봉이 아니면 마커/비교/지표 제거 (시간축 포맷 충돌 방지)
   if (mode !== 'daily') {
     eventMarkers = {};
     candleSeries && candleSeries.setMarkers([]);
     clearCompareSeries();
   }
+  // 모드 전환마다 지표 시리즈 제거 후 재생성 (daily↔minute 시간 포맷 혼입 방지)
+  IND_DEFS.forEach(def => {
+    const st = indState[def.key];
+    if (st?.series) {
+      try { mainChart.removeSeries(st.series); } catch(_) {}
+      st.series = null;
+    }
+  });
 
   // 기간 버튼 / 지표 바는 일봉 모드에서만 표시
   document.getElementById('period-btns').style.display = mode === 'daily' ? '' : 'none';
@@ -827,15 +862,11 @@ function setPeriod(years) {
     volChart.timeScale().fitContent();
     return;
   }
-  const data = candleSeries.data ? candleSeries.data() : null;
-  // 현재 가시 범위의 마지막 날짜 기준으로 계산
   const range = mainChart.timeScale().getVisibleRange();
-  const to = range ? range.to : new Date().toISOString().slice(0, 10);
-  const d = new Date(typeof to === 'string' ? to : to);
-  d.setFullYear(d.getFullYear() - years);
-  const from = d.toISOString().slice(0, 10);
-  mainChart.timeScale().setVisibleRange({ from, to: typeof to === 'string' ? to : new Date(to * 1000).toISOString().slice(0,10) });
-  volChart.timeScale().setVisibleRange({ from, to: typeof to === 'string' ? to : new Date(to * 1000).toISOString().slice(0,10) });
+  const toTs   = range ? range.to : Math.floor(Date.now() / 1000);
+  const fromTs = toTs - years * 365.25 * 86400;
+  mainChart.timeScale().setVisibleRange({ from: fromTs, to: toTs });
+  volChart.timeScale().setVisibleRange({ from: fromTs, to: toTs });
 }
 
 function toggleNorm() {
@@ -986,13 +1017,15 @@ async function loadSectorCompare() {
 
   if (!peers.length) return;
 
-  const range = mainChart.timeScale().getVisibleRange();
-  const from  = range?.from ?? '2020-01-01';
-  const to    = range?.to   ?? new Date().toISOString().slice(0,10);
+  const range  = mainChart.timeScale().getVisibleRange();
+  const toTs   = range?.to   ?? Math.floor(Date.now() / 1000);
+  const fromTs = range?.from ?? (toTs - 5 * 365.25 * 86400);
+  const fromDate = new Date(fromTs * 1000).toISOString().slice(0, 10);
+  const toDate   = new Date(toTs   * 1000).toISOString().slice(0, 10);
 
   let data;
   try {
-    const res = await fetch(`${API}/api/sector_compare.php?tickers=${[currentTicker,...peers].join(',')}&from=${from}&to=${to}&limit=10`);
+    const res = await fetch(`${API}/api/sector_compare.php?tickers=${[currentTicker,...peers].join(',')}&from=${fromDate}&to=${toDate}&limit=10`);
     data = await res.json();
   } catch(e) { return; }
 
@@ -1027,7 +1060,7 @@ async function loadSectorCompare() {
       title: ticker,
     });
     const chartData = dates
-      .map((d, i) => norm[i] != null ? { time: d, value: norm[i] } : null)
+      .map((d, i) => norm[i] != null ? { time: Math.floor(new Date(d + 'T00:00:00Z').getTime() / 1000), value: norm[i] } : null)
       .filter(Boolean);
     s.setData(chartData);
     compareSeries[ticker] = s;
