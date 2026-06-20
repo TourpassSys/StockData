@@ -312,7 +312,7 @@ async function loadStock(ticker) {
 
   // 시퀀스 정보 로딩
   if (currentMode === 'sequence') {
-    const sRes = await fetch(`${API}/api/sequences/${ticker}`);
+    const sRes = await fetch(`${API}/api/sequences.php?ticker=${ticker}`);
     const sData = await sRes.json();
     seqTotal = sData.n_sequences;
     seqIdx   = Math.min(seqIdx, seqTotal - 1);
@@ -325,7 +325,7 @@ async function loadStock(ticker) {
 
   const apiMode  = currentMode === 'sequence' ? 'minute' : currentMode;
   const seqParam = currentMode === 'sequence' ? `&seq=${seqIdx}` : '';
-  const url = `${API}/api/stock/${ticker}?mode=${apiMode}&normalized=${normalized}&trading=${tradingHours}${seqParam}`;
+  const url = `${API}/api/stock.php?ticker=${ticker}&mode=${apiMode}&normalized=${normalized}&trading=${tradingHours}${seqParam}`;
 
   try {
     const res = await fetch(url);
@@ -465,7 +465,7 @@ function renderSidebar() {
 }
 
 async function buildSidebar() {
-  const res  = await fetch(`${API}/api/summary`);
+  const res  = await fetch(`${API}/api/summary.php`);
   const data = await res.json();
   sidebarCache = data;
   document.getElementById('ticker-count').textContent = data.length + '개 종목';
@@ -474,7 +474,7 @@ async function buildSidebar() {
 
 // ── 검색 ──
 async function buildSearch() {
-  const res  = await fetch(`${API}/api/tickers`);
+  const res  = await fetch(`${API}/api/tickers.php`);
   allTickers = await res.json();
 
   const input    = document.getElementById('ticker-input');
