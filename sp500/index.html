@@ -102,6 +102,56 @@ main { display: flex; flex: 1; overflow: hidden; }
 .change-big { font-size: 13px; }
 .norm-indicator { font-size: 11px; padding: 2px 8px; background: #7c3aed33; border: 1px solid #7c3aed; border-radius: 4px; color: #a78bfa; }
 
+/* ── 이벤트 패널 ── */
+.event-panel {
+  width: 300px; min-width: 300px; background: #141624;
+  border-left: 1px solid #2a2d3e; display: flex; flex-direction: column;
+  overflow: hidden; transition: width .2s;
+}
+.event-panel.collapsed { width: 0; min-width: 0; border: none; }
+.event-panel-header {
+  padding: 9px 12px; background: #1a1d2e; border-bottom: 1px solid #2a2d3e;
+  display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;
+}
+.event-panel-title { font-size: 12px; font-weight: 600; color: #e0e0e0; }
+.event-panel-date  { font-size: 11px; color: #4a6fa5; }
+.event-toggle-btn {
+  background: none; border: 1px solid #3a3d4e; color: #666; border-radius: 4px;
+  padding: 3px 8px; cursor: pointer; font-size: 11px;
+}
+.event-toggle-btn:hover { color: #aaa; border-color: #555; }
+#event-list { overflow-y: auto; flex: 1; padding: 8px; }
+.event-card {
+  border-radius: 6px; margin-bottom: 6px; overflow: hidden;
+  background: #1e2130; border: 1px solid #2a2d3e; cursor: pointer;
+  transition: border-color .15s;
+}
+.event-card:hover { border-color: #3a3d4e; }
+.event-card-head {
+  display: flex; align-items: center; gap: 6px; padding: 7px 10px;
+  border-left: 3px solid transparent;
+}
+.event-card-body {
+  padding: 0 10px 8px 10px; font-size: 11px; color: #8b93a5;
+  border-top: 1px solid #252839; display: none; line-height: 1.5;
+}
+.event-card.expanded .event-card-body { display: block; }
+.event-cat-badge {
+  font-size: 9px; font-weight: 700; padding: 2px 5px; border-radius: 3px;
+  white-space: nowrap; letter-spacing: .5px;
+}
+.event-title { font-size: 11px; color: #c8cdd8; flex: 1; line-height: 1.35; }
+.event-impact { display: flex; gap: 2px; }
+.event-impact span { width: 5px; height: 5px; border-radius: 1px; background: #2a2d3e; }
+.event-sent { font-size: 12px; font-weight: 700; margin-left: 4px; }
+.sent-pos { color: #22c55e; } .sent-neg { color: #ef4444; } .sent-neu { color: #666; }
+.event-empty { padding: 24px 12px; text-align: center; font-size: 12px; color: #3a3d4e; }
+.event-link { color: #4a6fa5; font-size: 10px; text-decoration: none; }
+.event-link:hover { color: #60a5fa; }
+.evt-marker-toggle {
+  font-size: 11px; padding: 4px 10px; white-space: nowrap;
+}
+
 /* ── 시퀀스 패널 ── */
 .seq-panel {
   background: #141624; border-bottom: 1px solid #2a2d3e;
@@ -183,11 +233,14 @@ main { display: flex; flex: 1; overflow: hidden; }
 
   <!-- 차트 -->
   <div class="chart-area">
-    <div class="chart-header">
+    <div class="chart-header" style="justify-content: space-between;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
       <span class="ticker-big" id="h-ticker">—</span>
       <span class="price-big" id="h-price">—</span>
       <span class="change-big" id="h-change">—</span>
       <span class="norm-indicator" id="h-norm" style="display:none">정규화됨 (Min-Max)</span>
+      </div>
+      <button class="btn evt-marker-toggle" id="evt-toggle-btn" onclick="toggleEventPanel()" title="외부요인 이벤트 패널">📋 이벤트</button>
     </div>
 
     <!-- 시퀀스 패널 -->
@@ -207,6 +260,20 @@ main { display: flex; flex: 1; overflow: hidden; }
       <div class="loading" id="loading">데이터 로딩 중...</div>
     </div>
   </div>
+
+  <!-- 이벤트 패널 -->
+  <div class="event-panel collapsed" id="event-panel">
+    <div class="event-panel-header">
+      <div>
+        <div class="event-panel-title">외부요인 이벤트</div>
+        <div class="event-panel-date" id="event-panel-date">—</div>
+      </div>
+      <button class="event-toggle-btn" onclick="toggleEventPanel()">✕</button>
+    </div>
+    <div id="event-list">
+      <div class="event-empty">차트에서 날짜를 선택하세요</div>
+    </div>
+  </div>
 </main>
 
 <script>
@@ -219,11 +286,18 @@ let allTickers = [];
 let summaryData = [];
 let sidebarSort = 'chg';
 let currentTicker = 'AAPL';
-let currentMode   = 'daily';    // daily | minute | sequence
+let currentMode   = 'daily';
 let normalized    = false;
 let tradingHours  = true;
 let seqTotal      = 0;
 let seqIdx        = 0;
+
+// ── 이벤트 패널 상태 ──
+let eventPanelOpen  = false;
+let eventMarkers    = {};   // { 'YYYY-MM-DD': { impact, count, sentiment, categories } }
+let eventCache      = {};   // { 'TICKER|YYYY-MM-DD': [...events] }
+let lastEventDate   = null;
+let eventFetchTimer = null;
 
 // ── 차트 ──
 let mainChart, volChart, candleSeries, volumeSeries;
@@ -284,7 +358,7 @@ function initCharts() {
     scaleMargins: { top: 0.1, bottom: 0 },
   });
 
-  // 크로스헤어 → 통계바
+  // 크로스헤어 → 통계바 + 이벤트 패널
   mainChart.subscribeCrosshairMove(param => {
     const d = param.seriesData?.get(candleSeries);
     if (d) {
@@ -292,6 +366,17 @@ function initCharts() {
       document.getElementById('s-high').textContent  = fmt(d.high,  normalized);
       document.getElementById('s-low').textContent   = fmt(d.low,   normalized);
       document.getElementById('s-close').textContent = fmt(d.close, normalized);
+
+      // 일봉 + 이벤트 패널 열려있을 때 날짜별 이벤트 표시
+      if (eventPanelOpen && currentMode === 'daily' && param.time) {
+        const dateStr = typeof param.time === 'string' ? param.time
+          : new Date(param.time * 1000).toISOString().slice(0, 10);
+        if (dateStr !== lastEventDate) {
+          lastEventDate = dateStr;
+          clearTimeout(eventFetchTimer);
+          eventFetchTimer = setTimeout(() => loadEventsForDate(dateStr), 120);
+        }
+      }
     }
   });
 
@@ -348,6 +433,13 @@ async function loadStock(ticker) {
     mainChart.timeScale().fitContent();
     volChart.timeScale().fitContent();
 
+    // 이벤트 마커 로드
+    eventMarkers = {};
+    candleSeries.setMarkers([]);
+    if (eventPanelOpen && currentMode === 'daily') {
+      loadEventMarkers();
+    }
+
     // 헤더
     if (candles.length > 0) {
       const last  = candles[candles.length - 1];
@@ -384,6 +476,134 @@ async function loadStock(ticker) {
   }
 }
 
+// ── 이벤트 패널 ──────────────────────────────────────────────────────────
+const CAT_META = {
+  MACRO:      { color: '#3b5bdb', label: 'MACRO',   bg: '#3b5bdb22' },
+  POLICY:     { color: '#ae3ec9', label: 'POLICY',  bg: '#ae3ec922' },
+  GEO:        { color: '#e03131', label: 'GEO',     bg: '#e0313122' },
+  EARNINGS:   { color: '#2f9e44', label: 'EARN',    bg: '#2f9e4422' },
+  COMPETITOR: { color: '#e67700', label: 'COMP',    bg: '#e6770022' },
+  PRODUCT:    { color: '#0c8599', label: 'PROD',    bg: '#0c859922' },
+  MANAGEMENT: { color: '#9c36b5', label: 'MGMT',    bg: '#9c36b522' },
+  ANALYST:    { color: '#868e96', label: 'ANALYST', bg: '#868e9622' },
+  LEGAL:      { color: '#c92a2a', label: 'LEGAL',   bg: '#c92a2a22' },
+};
+
+function toggleEventPanel() {
+  eventPanelOpen = !eventPanelOpen;
+  const panel = document.getElementById('event-panel');
+  const btn   = document.getElementById('evt-toggle-btn');
+  panel.classList.toggle('collapsed', !eventPanelOpen);
+  btn.classList.toggle('toggle-on', eventPanelOpen);
+
+  if (eventPanelOpen && currentMode === 'daily') {
+    loadEventMarkers();
+    if (lastEventDate) loadEventsForDate(lastEventDate);
+  }
+}
+
+async function loadEventMarkers() {
+  if (!currentTicker || currentMode !== 'daily') return;
+  try {
+    const res  = await fetch(`${API}/api/event_markers.php?ticker=${currentTicker}&from=2013-01-01&to=2026-12-31`);
+    const data = await res.json();
+    eventMarkers = data.markers || {};
+    applyChartMarkers();
+  } catch(e) { console.warn('event_markers:', e); }
+}
+
+function applyChartMarkers() {
+  if (!candleSeries || !eventPanelOpen || currentMode !== 'daily') {
+    candleSeries && candleSeries.setMarkers([]);
+    return;
+  }
+  const markers = [];
+  for (const [date, info] of Object.entries(eventMarkers)) {
+    const s = info.sentiment;
+    const color = s > 0 ? '#22c55e' : s < 0 ? '#ef4444' : '#fab005';
+    markers.push({
+      time:     date,
+      position: 'aboveBar',
+      color,
+      shape:    info.impact >= 4 ? 'arrowUp' : 'circle',
+      size:     Math.min(info.impact - 1, 2),
+      text:     info.count > 1 ? String(info.count) : '',
+    });
+  }
+  markers.sort((a, b) => a.time < b.time ? -1 : 1);
+  candleSeries.setMarkers(markers);
+}
+
+async function loadEventsForDate(date) {
+  const cacheKey = `${currentTicker}|${date}`;
+  let events;
+
+  if (eventCache[cacheKey] !== undefined) {
+    events = eventCache[cacheKey];
+  } else {
+    try {
+      const res  = await fetch(`${API}/api/events.php?ticker=${currentTicker}&date=${date}&limit=30`);
+      const data = await res.json();
+      events = data.events || [];
+      eventCache[cacheKey] = events;
+    } catch(e) { events = []; }
+  }
+
+  document.getElementById('event-panel-date').textContent = date;
+  renderEventList(events, date);
+}
+
+function renderEventList(events, date) {
+  const el = document.getElementById('event-list');
+  if (!events.length) {
+    el.innerHTML = `<div class="event-empty">📭 ${date}<br>이 날짜에 등록된 이벤트가 없습니다</div>`;
+    return;
+  }
+
+  // scope 순 정렬: STOCK → SECTOR → MARKET, 그다음 impact 내림차순
+  const scopeOrder = { STOCK: 0, SECTOR: 1, MARKET: 2 };
+  events.sort((a, b) => {
+    const sd = (scopeOrder[a.scope] ?? 3) - (scopeOrder[b.scope] ?? 3);
+    return sd !== 0 ? sd : b.impact - a.impact;
+  });
+
+  el.innerHTML = events.map((ev, i) => {
+    const meta   = CAT_META[ev.category] || CAT_META.PRODUCT;
+    const stars  = '★'.repeat(ev.impact) + '☆'.repeat(Math.max(0, 5 - ev.impact));
+    const sentIcon = ev.sentiment > 0 ? '<span class="event-sent sent-pos">▲</span>'
+                   : ev.sentiment < 0 ? '<span class="event-sent sent-neg">▼</span>'
+                   : '<span class="event-sent sent-neu">—</span>';
+    const scopeBadge = ev.scope !== 'MARKET' && ev.ticker
+      ? `<span style="font-size:9px;color:${meta.color};margin-right:4px">${ev.ticker}</span>` : '';
+    const bodyHtml = ev.summary
+      ? `<div style="margin-top:4px">${ev.summary}</div>` : '';
+    const linkHtml = ev.url
+      ? `<div style="margin-top:5px"><a class="event-link" href="${ev.url}" target="_blank">원문 보기 →</a></div>` : '';
+    const srcHtml  = ev.source
+      ? `<div style="color:#4a4d5e;margin-top:3px;font-size:10px">출처: ${ev.source}</div>` : '';
+    const timeHtml = ev.time
+      ? `<span style="color:#4a6fa5;margin-right:6px">${ev.time}</span>` : '';
+
+    return `
+      <div class="event-card" id="evc-${i}" onclick="toggleEventCard(${i})">
+        <div class="event-card-head" style="border-left-color:${meta.color};background:${meta.bg}">
+          <span class="event-cat-badge" style="background:${meta.color}20;color:${meta.color}">${meta.label}</span>
+          ${scopeBadge}
+          <span class="event-title">${ev.title}</span>
+          ${sentIcon}
+        </div>
+        <div class="event-card-body">
+          ${timeHtml}<span style="color:#555;font-size:10px">${stars}</span>
+          ${bodyHtml}${linkHtml}${srcHtml}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function toggleEventCard(i) {
+  document.getElementById(`evc-${i}`)?.classList.toggle('expanded');
+}
+
 // ── 모드 ──
 function setMode(mode, btn) {
   currentMode = mode;
@@ -393,6 +613,12 @@ function setMode(mode, btn) {
   const seqPanel = document.getElementById('seq-panel');
   seqPanel.classList.toggle('visible', mode === 'sequence');
   seqIdx = 0;
+
+  // 일봉이 아니면 마커 제거
+  if (mode !== 'daily') {
+    eventMarkers = {};
+    candleSeries && candleSeries.setMarkers([]);
+  }
 
   loadStock(currentTicker);
 }
