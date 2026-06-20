@@ -80,15 +80,31 @@ main { display: flex; flex: 1; overflow: hidden; }
 .sidebar-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
 #stock-list { overflow-y: auto; flex: 1; }
 .stock-item {
-  padding: 7px 12px; cursor: pointer; font-size: 12px;
+  padding: 6px 12px; cursor: pointer; font-size: 12px;
   display: flex; justify-content: space-between; align-items: center;
-  border-bottom: 1px solid #1a1d2e; transition: background .1s;
+  border-bottom: 1px solid #1a1d2e; transition: background .1s; gap: 6px;
 }
 .stock-item:hover { background: #1e2130; }
 .stock-item.active { background: #1e2a4a; border-left: 3px solid #2563eb; padding-left: 9px; }
 .stock-item .ticker { font-weight: 600; color: #e0e0e0; }
 .stock-item .chg { font-size: 11px; }
 .stock-item .seq-count { font-size: 10px; color: #555; }
+.sector-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+.sector-header {
+  padding: 5px 12px 3px; font-size: 10px; font-weight: 700; letter-spacing: .5px;
+  color: #888; display: flex; align-items: center; gap: 5px;
+  border-left: 3px solid transparent; margin-top: 2px;
+  text-transform: uppercase;
+}
+.sector-header .s-icon { font-size: 11px; }
+/* 섹터 비교 범례 */
+.compare-legend {
+  padding: 4px 12px; font-size: 10px; color: #666; display: none;
+  flex-wrap: wrap; gap: 6px; background: #0f1120; border-bottom: 1px solid #2a2d3e;
+}
+.compare-legend.visible { display: flex; }
+.cleg-item { display: flex; align-items: center; gap: 3px; }
+.cleg-dot  { width: 8px; height: 8px; border-radius: 50%; }
 
 /* ── CHART AREA ── */
 .chart-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
@@ -246,6 +262,7 @@ main { display: flex; flex: 1; overflow: hidden; }
       <div class="sidebar-tab active" onclick="setSidebarSort('chg',this)">수익률순</div>
       <div class="sidebar-tab" onclick="setSidebarSort('vol',this)">거래량순</div>
       <div class="sidebar-tab" onclick="setSidebarSort('az',this)">A-Z</div>
+      <div class="sidebar-tab" onclick="setSidebarSort('sector',this)">업종</div>
     </div>
     <div class="sidebar-header">
       <span id="ticker-count">로딩중...</span>
@@ -268,11 +285,14 @@ main { display: flex; flex: 1; overflow: hidden; }
         <button class="btn" onclick="setPeriod(10)">10Y</button>
         <button class="btn" onclick="setPeriod(0)">전체</button>
       </div>
+      <button class="btn" id="compare-btn" onclick="toggleCompare()" title="같은 업종 종목 비교">📊 섹터비교</button>
       <button class="btn evt-marker-toggle" id="evt-toggle-btn" onclick="toggleEventPanel()" title="외부요인 이벤트 패널">📋 이벤트</button>
     </div>
 
     <!-- 지표 바 -->
     <div class="indicator-bar" id="indicator-bar"></div>
+    <!-- 섹터 비교 범례 -->
+    <div class="compare-legend" id="compare-legend"></div>
 
     <!-- 시퀀스 패널 -->
     <div class="seq-panel" id="seq-panel">
@@ -322,6 +342,30 @@ let normalized    = false;
 let tradingHours  = true;
 let seqTotal      = 0;
 let seqIdx        = 0;
+let sectorMap     = {};   // ticker → {sector, industry, name}
+let compareMode   = false;
+let compareSeries = {};   // ticker → LineSeries
+
+const SECTORS = {
+  'Information Technology': { color: '#3b82f6', icon: '💻', short: 'IT' },
+  'Health Care':            { color: '#ef4444', icon: '🏥', short: 'HC' },
+  'Financials':             { color: '#f59e0b', icon: '🏦', short: 'FIN' },
+  'Consumer Discretionary': { color: '#a78bfa', icon: '🛒', short: 'CD' },
+  'Communication Services': { color: '#06b6d4', icon: '📡', short: 'COM' },
+  'Industrials':            { color: '#64748b', icon: '⚙️', short: 'IND' },
+  'Consumer Staples':       { color: '#22c55e', icon: '🏪', short: 'CS' },
+  'Energy':                 { color: '#f97316', icon: '⛽', short: 'ENE' },
+  'Utilities':              { color: '#84cc16', icon: '💡', short: 'UTL' },
+  'Real Estate':            { color: '#ec4899', icon: '🏠', short: 'RE' },
+  'Materials':              { color: '#94a3b8', icon: '⛏️', short: 'MAT' },
+  'Unknown':                { color: '#555555', icon: '❓', short: '?' },
+};
+function sectorOf(ticker) {
+  return sectorMap[ticker]?.sector || 'Unknown';
+}
+function sectorMeta(sector) {
+  return SECTORS[sector] || SECTORS['Unknown'];
+}
 
 // ── 이벤트 패널 상태 ──
 let eventPanelOpen  = false;
@@ -568,6 +612,10 @@ async function loadStock(ticker) {
     // 지표 업데이트
     refreshIndicators();
 
+    // 섹터 비교 초기화/재로드
+    clearCompareSeries();
+    if (compareMode && currentMode === 'daily') loadSectorCompare();
+
     // 이벤트 마커 로드
     eventMarkers = {};
     candleSeries.setMarkers([]);
@@ -758,10 +806,11 @@ function setMode(mode, btn) {
   seqPanel.classList.toggle('visible', mode === 'sequence');
   seqIdx = 0;
 
-  // 일봉이 아니면 마커 제거
+  // 일봉이 아니면 마커/비교 제거
   if (mode !== 'daily') {
     eventMarkers = {};
     candleSeries && candleSeries.setMarkers([]);
+    clearCompareSeries();
   }
 
   // 기간 버튼 / 지표 바는 일봉 모드에서만 표시
@@ -832,36 +881,172 @@ function setSidebarSort(sort, tab) {
   renderSidebar();
 }
 
+function makeStockItem(d) {
+  const el  = document.createElement('div');
+  el.className = 'stock-item' + (d.ticker === currentTicker ? ' active' : '');
+  el.dataset.ticker = d.ticker;
+  const up   = d.change_pct >= 0;
+  const meta = sectorMeta(d.sector || 'Unknown');
+  el.innerHTML = `
+    <span class="sector-dot" style="background:${meta.color}" title="${d.sector||'Unknown'}"></span>
+    <span class="ticker" style="flex:1">${d.ticker}</span>
+    <div style="text-align:right">
+      <div class="chg ${up ? 'up' : 'down'}">${up ? '+' : ''}${d.change_pct.toFixed(1)}%</div>
+      <div class="seq-count">${d.n_sequences}seq</div>
+    </div>`;
+  el.onclick = () => loadStock(d.ticker);
+  return el;
+}
+
 function renderSidebar() {
   let data = [...sidebarCache];
-  if (sidebarSort === 'chg') data.sort((a,b) => b.change_pct - a.change_pct);
-  else if (sidebarSort === 'vol') data.sort((a,b) => b.volume - a.volume);
-  else data.sort((a,b) => a.ticker.localeCompare(b.ticker));
-
   const list = document.getElementById('stock-list');
   list.innerHTML = '';
-  data.forEach(d => {
-    const el = document.createElement('div');
-    el.className = 'stock-item' + (d.ticker === currentTicker ? ' active' : '');
-    el.dataset.ticker = d.ticker;
-    const up = d.change_pct >= 0;
-    el.innerHTML = `
-      <span class="ticker">${d.ticker}</span>
-      <div style="text-align:right">
-        <div class="chg ${up ? 'up' : 'down'}">${up ? '+' : ''}${d.change_pct.toFixed(1)}%</div>
-        <div class="seq-count">${d.n_sequences}seq</div>
-      </div>`;
-    el.onclick = () => loadStock(d.ticker);
-    list.appendChild(el);
-  });
+
+  if (sidebarSort === 'sector') {
+    // 섹터별 그룹
+    const groups = {};
+    data.forEach(d => {
+      const s = d.sector || 'Unknown';
+      if (!groups[s]) groups[s] = [];
+      groups[s].push(d);
+    });
+    // 섹터 내 알파벳 정렬
+    Object.keys(groups).sort().forEach(sector => {
+      const meta  = sectorMeta(sector);
+      const hdr   = document.createElement('div');
+      hdr.className = 'sector-header';
+      hdr.style.borderLeftColor = meta.color;
+      hdr.style.color = meta.color;
+      hdr.innerHTML = `<span class="s-icon">${meta.icon}</span>${sector} <span style="color:#444;font-weight:400">(${groups[sector].length})</span>`;
+      list.appendChild(hdr);
+      groups[sector].sort((a,b) => a.ticker.localeCompare(b.ticker))
+        .forEach(d => list.appendChild(makeStockItem(d)));
+    });
+  } else {
+    if (sidebarSort === 'chg') data.sort((a,b) => b.change_pct - a.change_pct);
+    else if (sidebarSort === 'vol') data.sort((a,b) => b.volume - a.volume);
+    else data.sort((a,b) => a.ticker.localeCompare(b.ticker));
+    data.forEach(d => list.appendChild(makeStockItem(d)));
+  }
 }
 
 async function buildSidebar() {
-  const res  = await fetch(`${API}/api/summary.php`);
-  const data = await res.json();
+  const [sumRes, secRes] = await Promise.all([
+    fetch(`${API}/api/summary.php`),
+    fetch(`${API}/api/sectors.php`),
+  ]);
+  const data = await sumRes.json();
+  sectorMap  = await secRes.json().catch(() => ({}));
+
+  // summary 데이터에 sector 병합 (서버가 이미 포함하지만 fallback)
+  data.forEach(d => {
+    if (!d.sector && sectorMap[d.ticker]) d.sector = sectorMap[d.ticker].sector;
+  });
+
   sidebarCache = data;
   document.getElementById('ticker-count').textContent = data.length + '개 종목';
   renderSidebar();
+}
+
+// ── 섹터 비교 ────────────────────────────────────────────────────────────────
+const COMPARE_COLORS = [
+  '#60a5fa','#f472b6','#34d399','#fbbf24','#a78bfa',
+  '#fb923c','#38bdf8','#f87171','#4ade80','#e879f9',
+];
+
+function clearCompareSeries() {
+  Object.values(compareSeries).forEach(s => { try { mainChart.removeSeries(s); } catch(_){} });
+  compareSeries = {};
+  document.getElementById('compare-legend').innerHTML = '';
+  document.getElementById('compare-legend').classList.remove('visible');
+}
+
+function toggleCompare() {
+  compareMode = !compareMode;
+  const btn = document.getElementById('compare-btn');
+  btn.classList.toggle('toggle-on', compareMode);
+  if (!compareMode) {
+    clearCompareSeries();
+    return;
+  }
+  if (currentMode === 'daily') loadSectorCompare();
+}
+
+async function loadSectorCompare() {
+  clearCompareSeries();
+  if (!compareMode || currentMode !== 'daily' || !currentTicker) return;
+
+  const mySector = sectorOf(currentTicker);
+  const peers = sidebarCache
+    .filter(d => (d.sector || 'Unknown') === mySector && d.ticker !== currentTicker)
+    .sort((a,b) => b.volume - a.volume)
+    .slice(0, 8)
+    .map(d => d.ticker);
+
+  if (!peers.length) return;
+
+  const range = mainChart.timeScale().getVisibleRange();
+  const from  = range?.from ?? '2020-01-01';
+  const to    = range?.to   ?? new Date().toISOString().slice(0,10);
+
+  let data;
+  try {
+    const res = await fetch(`${API}/api/sector_compare.php?tickers=${[currentTicker,...peers].join(',')}&from=${from}&to=${to}&limit=10`);
+    data = await res.json();
+  } catch(e) { return; }
+
+  const { dates, series } = data;
+  if (!dates?.length) return;
+
+  // 첫 유효값 기준으로 정규화 (% 변화)
+  function normalize(arr) {
+    const first = arr.find(v => v != null);
+    if (!first) return arr;
+    return arr.map(v => v == null ? null : +((v / first - 1) * 100).toFixed(4));
+  }
+
+  const legend = document.getElementById('compare-legend');
+  legend.innerHTML = `<span style="color:#888;font-size:10px">${mySector} 비교 (%)  </span>`;
+
+  // 현재 종목 포함 전체 시리즈 그리기
+  const allTkrs = [currentTicker, ...peers];
+  allTkrs.forEach((ticker, idx) => {
+    const raw = series[ticker];
+    if (!raw) return;
+    const norm = normalize(raw);
+    const color = ticker === currentTicker ? '#ffffff' : COMPARE_COLORS[idx % COMPARE_COLORS.length];
+    const lineWidth = ticker === currentTicker ? 2 : 1;
+
+    const s = mainChart.addLineSeries({
+      color, lineWidth,
+      priceScaleId: 'compare',
+      priceLineVisible: false,
+      lastValueVisible: true,
+      crosshairMarkerVisible: false,
+      title: ticker,
+    });
+    const chartData = dates
+      .map((d, i) => norm[i] != null ? { time: d, value: norm[i] } : null)
+      .filter(Boolean);
+    s.setData(chartData);
+    compareSeries[ticker] = s;
+
+    // 범례
+    const dot = document.createElement('span');
+    dot.className = 'cleg-item';
+    dot.innerHTML = `<span class="cleg-dot" style="background:${color}"></span><span style="color:${color}">${ticker}</span>`;
+    legend.appendChild(dot);
+  });
+
+  // compare 스케일은 오른쪽에 별도 표시
+  mainChart.priceScale('compare').applyOptions({
+    scaleMargins: { top: 0.1, bottom: 0.1 },
+    visible: true,
+    borderColor: '#2a2d3e',
+  });
+
+  legend.classList.add('visible');
 }
 
 // ── 검색 ──
