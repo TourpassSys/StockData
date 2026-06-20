@@ -18,7 +18,7 @@
 StockData/
 ├── index.html          ← 메인 메뉴
 └── sp500/
-    ├── dashboard.html  ← S&P 500 대시보드
+    ├── index.html  ← S&P 500 대시보드
     ├── api/
     │   └── index.php   ← PHP API (SQLite)
     ├── db/             ← 데이터 파일 (gitignore)

@@ -10,7 +10,7 @@ echo "→ $USER@$SERVER:$REMOTE"
 ssh "$USER@$SERVER" "mkdir -p $REMOTE/api $REMOTE/db $REMOTE/deploy"
 
 # 핵심 파일
-scp "$LOCAL/dashboard.html"          "$USER@$SERVER:$REMOTE/"
+scp "$LOCAL/index.html"          "$USER@$SERVER:$REMOTE/"
 scp "$LOCAL/api/index.php"           "$USER@$SERVER:$REMOTE/api/"
 scp "$LOCAL/convert_to_sqlite.py"    "$USER@$SERVER:$REMOTE/"
 
