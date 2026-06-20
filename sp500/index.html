@@ -192,7 +192,7 @@ main { display: flex; flex: 1; overflow: hidden; }
 
 <header>
   <h1>S&amp;P 500</h1>
-  <span class="badge badge-blue">2013–2018</span>
+  <span class="badge badge-blue">1962–2026</span>
   <span class="badge badge-gray">nickdl/alpha</span>
 
   <div class="search-wrap">
@@ -243,6 +243,12 @@ main { display: flex; flex: 1; overflow: hidden; }
       <span class="price-big" id="h-price">—</span>
       <span class="change-big" id="h-change">—</span>
       <span class="norm-indicator" id="h-norm" style="display:none">정규화됨 (Min-Max)</span>
+      </div>
+      <div class="btn-group period-btns" id="period-btns" style="display:none">
+        <button class="btn" onclick="setPeriod(1)">1Y</button>
+        <button class="btn" onclick="setPeriod(5)">5Y</button>
+        <button class="btn" onclick="setPeriod(10)">10Y</button>
+        <button class="btn" onclick="setPeriod(0)">전체</button>
       </div>
       <button class="btn evt-marker-toggle" id="evt-toggle-btn" onclick="toggleEventPanel()" title="외부요인 이벤트 패널">📋 이벤트</button>
     </div>
@@ -434,8 +440,19 @@ async function loadStock(ticker) {
 
     candleSeries.setData(candles);
     volumeSeries.setData(vols);
-    mainChart.timeScale().fitContent();
-    volChart.timeScale().fitContent();
+
+    // 일봉: 기본 5년 뷰, 분봉/시퀀스: fitContent
+    if (currentMode === 'daily' && candles.length > 0) {
+      const last = candles[candles.length - 1].time;
+      const d = new Date(last);
+      d.setFullYear(d.getFullYear() - 5);
+      const from = d.toISOString().slice(0, 10);
+      mainChart.timeScale().setVisibleRange({ from, to: last });
+      volChart.timeScale().setVisibleRange({ from, to: last });
+    } else {
+      mainChart.timeScale().fitContent();
+      volChart.timeScale().fitContent();
+    }
 
     // 이벤트 마커 로드
     eventMarkers = {};
@@ -509,7 +526,7 @@ function toggleEventPanel() {
 async function loadEventMarkers() {
   if (!currentTicker || currentMode !== 'daily') return;
   try {
-    const res  = await fetch(`${API}/api/event_markers.php?ticker=${currentTicker}&from=2013-01-01&to=2026-12-31`);
+    const res  = await fetch(`${API}/api/event_markers.php?ticker=${currentTicker}&from=1962-01-01&to=2099-12-31`);
     const data = await res.json();
     eventMarkers = data.markers || {};
     applyChartMarkers();
@@ -633,7 +650,28 @@ function setMode(mode, btn) {
     candleSeries && candleSeries.setMarkers([]);
   }
 
+  // 기간 버튼은 일봉 모드에서만 표시
+  document.getElementById('period-btns').style.display = mode === 'daily' ? '' : 'none';
+
   loadStock(currentTicker);
+}
+
+function setPeriod(years) {
+  if (!candleSeries) return;
+  if (years === 0) {
+    mainChart.timeScale().fitContent();
+    volChart.timeScale().fitContent();
+    return;
+  }
+  const data = candleSeries.data ? candleSeries.data() : null;
+  // 현재 가시 범위의 마지막 날짜 기준으로 계산
+  const range = mainChart.timeScale().getVisibleRange();
+  const to = range ? range.to : new Date().toISOString().slice(0, 10);
+  const d = new Date(typeof to === 'string' ? to : to);
+  d.setFullYear(d.getFullYear() - years);
+  const from = d.toISOString().slice(0, 10);
+  mainChart.timeScale().setVisibleRange({ from, to: typeof to === 'string' ? to : new Date(to * 1000).toISOString().slice(0,10) });
+  volChart.timeScale().setVisibleRange({ from, to: typeof to === 'string' ? to : new Date(to * 1000).toISOString().slice(0,10) });
 }
 
 function toggleNorm() {
@@ -756,6 +794,7 @@ window.addEventListener('resize', () => {
 // ── 초기화 ──
 async function init() {
   initCharts();
+  document.getElementById('period-btns').style.display = '';  // 기본 일봉 모드
   await Promise.all([buildSearch(), buildSidebar()]);
   loadStock('AAPL');
 }
