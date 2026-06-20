@@ -1,0 +1,14 @@
+# 대용량 데이터 파일 (git 제외)
+sp500/db/*.csv
+sp500/db/*.db
+sp500/db/*.npy
+
+# OS
+.DS_Store
+__pycache__/
+*.pyc
+*.pyo
+
+# 환경변수
+.env
+*.env

@@ -1,0 +1,526 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>S&P 500 Dashboard (nickdl/alpha)</title>
+<script src="https://cdn.jsdelivr.net/npm/lightweight-charts@4.1.3/dist/lightweight-charts.standalone.production.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #0f1117; color: #e0e0e0; font-family: 'Segoe UI', sans-serif; height: 100vh; display: flex; flex-direction: column; overflow: hidden; }
+
+/* ── HEADER ── */
+header {
+  background: #1a1d2e;
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #2a2d3e;
+  flex-shrink: 0;
+  flex-wrap: wrap;
+}
+header h1 { font-size: 16px; font-weight: 700; color: #fff; white-space: nowrap; }
+.badge { font-size: 11px; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+.badge-blue  { background: #2563eb; color: #fff; }
+.badge-gray  { background: #374151; color: #9ca3af; }
+
+.search-wrap { position: relative; }
+#ticker-input {
+  background: #252839; border: 1px solid #3a3d4e; color: #fff;
+  padding: 5px 11px; border-radius: 6px; font-size: 13px; width: 150px; outline: none;
+}
+#ticker-input:focus { border-color: #2563eb; }
+#ticker-dropdown {
+  position: absolute; top: 100%; left: 0; right: 0;
+  background: #1e2130; border: 1px solid #3a3d4e; border-radius: 6px;
+  max-height: 220px; overflow-y: auto; z-index: 100; display: none;
+}
+#ticker-dropdown .item { padding: 6px 12px; cursor: pointer; font-size: 13px; }
+#ticker-dropdown .item:hover { background: #2563eb33; }
+
+.btn-group { display: flex; gap: 4px; }
+.btn {
+  background: #252839; border: 1px solid #3a3d4e; color: #aaa;
+  padding: 5px 12px; border-radius: 6px; cursor: pointer; font-size: 12px;
+  transition: all .15s; white-space: nowrap;
+}
+.btn:hover { border-color: #555; color: #ddd; }
+.btn.active { background: #2563eb; border-color: #2563eb; color: #fff; }
+.btn.toggle-on { background: #16a34a33; border-color: #16a34a; color: #4ade80; }
+
+/* ── STAT BAR ── */
+.stat-bar {
+  display: flex; gap: 16px; padding: 7px 16px;
+  background: #141624; border-bottom: 1px solid #2a2d3e;
+  font-size: 12px; flex-shrink: 0; flex-wrap: wrap; align-items: center;
+}
+.stat { display: flex; gap: 5px; align-items: center; }
+.stat-label { color: #555; }
+.stat-value { font-weight: 600; color: #e0e0e0; }
+.up { color: #22c55e; } .down { color: #ef4444; }
+
+/* ── LAYOUT ── */
+main { display: flex; flex: 1; overflow: hidden; }
+
+/* ── SIDEBAR ── */
+.sidebar {
+  width: 196px; background: #141624; border-right: 1px solid #2a2d3e;
+  display: flex; flex-direction: column; flex-shrink: 0;
+}
+.sidebar-header {
+  padding: 8px 12px; font-size: 11px; color: #555;
+  border-bottom: 1px solid #2a2d3e; display: flex; justify-content: space-between;
+}
+.sidebar-tabs { display: flex; border-bottom: 1px solid #2a2d3e; }
+.sidebar-tab {
+  flex: 1; padding: 6px; text-align: center; font-size: 11px; color: #666;
+  cursor: pointer; border-bottom: 2px solid transparent;
+}
+.sidebar-tab.active { color: #2563eb; border-bottom-color: #2563eb; }
+#stock-list { overflow-y: auto; flex: 1; }
+.stock-item {
+  padding: 7px 12px; cursor: pointer; font-size: 12px;
+  display: flex; justify-content: space-between; align-items: center;
+  border-bottom: 1px solid #1a1d2e; transition: background .1s;
+}
+.stock-item:hover { background: #1e2130; }
+.stock-item.active { background: #1e2a4a; border-left: 3px solid #2563eb; padding-left: 9px; }
+.stock-item .ticker { font-weight: 600; color: #e0e0e0; }
+.stock-item .chg { font-size: 11px; }
+.stock-item .seq-count { font-size: 10px; color: #555; }
+
+/* ── CHART AREA ── */
+.chart-area { flex: 1; display: flex; flex-direction: column; overflow: hidden; }
+
+.chart-header {
+  padding: 10px 16px; background: #1a1d2e; border-bottom: 1px solid #2a2d3e;
+  display: flex; align-items: center; gap: 12px; flex-wrap: wrap;
+}
+.ticker-big { font-size: 22px; font-weight: 700; color: #fff; }
+.price-big  { font-size: 20px; font-weight: 600; }
+.change-big { font-size: 13px; }
+.norm-indicator { font-size: 11px; padding: 2px 8px; background: #7c3aed33; border: 1px solid #7c3aed; border-radius: 4px; color: #a78bfa; }
+
+/* ── 시퀀스 패널 ── */
+.seq-panel {
+  background: #141624; border-bottom: 1px solid #2a2d3e;
+  padding: 8px 16px; display: none; align-items: center; gap: 10px; flex-wrap: wrap;
+}
+.seq-panel.visible { display: flex; }
+.seq-label { font-size: 12px; color: #666; }
+.seq-info  { font-size: 12px; color: #a78bfa; font-weight: 600; }
+.seq-slider { flex: 1; min-width: 120px; max-width: 360px; accent-color: #7c3aed; }
+.seq-nav { display: flex; gap: 4px; }
+.seq-btn {
+  background: #252839; border: 1px solid #3a3d4e; color: #aaa;
+  padding: 3px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;
+}
+.seq-btn:hover { border-color: #7c3aed; color: #a78bfa; }
+
+#chart-container { flex: 1; position: relative; display: flex; flex-direction: column; }
+#chart        { width: 100%; }
+#volume-chart { width: 100%; border-top: 1px solid #2a2d3e; }
+
+.loading {
+  position: absolute; inset: 0; background: #0f1117cc;
+  display: flex; align-items: center; justify-content: center;
+  font-size: 14px; color: #666; z-index: 10;
+}
+.loading.hidden { display: none; }
+
+::-webkit-scrollbar { width: 5px; }
+::-webkit-scrollbar-track { background: #141624; }
+::-webkit-scrollbar-thumb { background: #3a3d4e; border-radius: 3px; }
+</style>
+</head>
+<body>
+
+<header>
+  <h1>S&amp;P 500</h1>
+  <span class="badge badge-blue">2013–2018</span>
+  <span class="badge badge-gray">nickdl/alpha</span>
+
+  <div class="search-wrap">
+    <input type="text" id="ticker-input" placeholder="종목 검색...">
+    <div id="ticker-dropdown"></div>
+  </div>
+
+  <div class="btn-group" id="mode-btns">
+    <button class="btn active" onclick="setMode('daily',this)">일봉</button>
+    <button class="btn" onclick="setMode('minute',this)">분봉</button>
+    <button class="btn" onclick="setMode('sequence',this)">시퀀스</button>
+  </div>
+
+  <button class="btn" id="norm-btn" onclick="toggleNorm()">정규화</button>
+  <button class="btn" id="hours-btn" onclick="toggleHours()" title="process.py: 09:30~16:00 필터">거래시간 필터 ON</button>
+</header>
+
+<div class="stat-bar">
+  <div class="stat"><span class="stat-label">종목</span><span class="stat-value" id="s-ticker">—</span></div>
+  <div class="stat"><span class="stat-label">시가</span><span class="stat-value" id="s-open">—</span></div>
+  <div class="stat"><span class="stat-label">고가</span><span class="stat-value up" id="s-high">—</span></div>
+  <div class="stat"><span class="stat-label">저가</span><span class="stat-value down" id="s-low">—</span></div>
+  <div class="stat"><span class="stat-label">종가</span><span class="stat-value" id="s-close">—</span></div>
+  <div class="stat"><span class="stat-label">거래량</span><span class="stat-value" id="s-vol">—</span></div>
+  <div class="stat"><span class="stat-label">수익률</span><span class="stat-value" id="s-chg">—</span></div>
+  <div class="stat"><span class="stat-label">시퀀스</span><span class="stat-value" id="s-seq" style="color:#a78bfa">—</span></div>
+</div>
+
+<main>
+  <!-- 사이드바 -->
+  <div class="sidebar">
+    <div class="sidebar-tabs">
+      <div class="sidebar-tab active" onclick="setSidebarSort('chg',this)">수익률순</div>
+      <div class="sidebar-tab" onclick="setSidebarSort('vol',this)">거래량순</div>
+      <div class="sidebar-tab" onclick="setSidebarSort('az',this)">A-Z</div>
+    </div>
+    <div class="sidebar-header">
+      <span id="ticker-count">로딩중...</span>
+    </div>
+    <div id="stock-list"></div>
+  </div>
+
+  <!-- 차트 -->
+  <div class="chart-area">
+    <div class="chart-header">
+      <span class="ticker-big" id="h-ticker">—</span>
+      <span class="price-big" id="h-price">—</span>
+      <span class="change-big" id="h-change">—</span>
+      <span class="norm-indicator" id="h-norm" style="display:none">정규화됨 (Min-Max)</span>
+    </div>
+
+    <!-- 시퀀스 패널 -->
+    <div class="seq-panel" id="seq-panel">
+      <span class="seq-label">시퀀스 (100-step):</span>
+      <span class="seq-info" id="seq-info">—</span>
+      <input type="range" class="seq-slider" id="seq-slider" min="0" value="0" oninput="onSeqSlider(this.value)">
+      <div class="seq-nav">
+        <button class="seq-btn" onclick="moveSeq(-1)">◀</button>
+        <button class="seq-btn" onclick="moveSeq(1)">▶</button>
+      </div>
+    </div>
+
+    <div id="chart-container">
+      <div id="chart"></div>
+      <div id="volume-chart"></div>
+      <div class="loading" id="loading">데이터 로딩 중...</div>
+    </div>
+  </div>
+</main>
+
+<script>
+// ── API 베이스 경로 (로컬: '' / 서버: '/data/v1/sp500') ──
+const API = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+  ? '' : '/data/v1/sp500';
+
+// ── 상태 ──
+let allTickers = [];
+let summaryData = [];
+let sidebarSort = 'chg';
+let currentTicker = 'AAPL';
+let currentMode   = 'daily';    // daily | minute | sequence
+let normalized    = false;
+let tradingHours  = true;
+let seqTotal      = 0;
+let seqIdx        = 0;
+
+// ── 차트 ──
+let mainChart, volChart, candleSeries, volumeSeries;
+
+// ── 포맷 ──
+function fmt(n, norm) {
+  if (n === null || n === undefined || isNaN(n)) return '—';
+  if (norm) return n.toFixed(4);
+  return n.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+function fmtVol(n, norm) {
+  if (n === null || n === undefined) return '—';
+  if (norm) return n.toFixed(4);
+  if (n >= 1e9) return (n/1e9).toFixed(1)+'B';
+  if (n >= 1e6) return (n/1e6).toFixed(1)+'M';
+  if (n >= 1e3) return (n/1e3).toFixed(1)+'K';
+  return n.toString();
+}
+
+function initCharts() {
+  const container = document.getElementById('chart-container');
+  const h = container.clientHeight;
+  const mainH = Math.floor(h * 0.68);
+  const volH  = Math.floor(h * 0.30);
+  document.getElementById('chart').style.height        = mainH + 'px';
+  document.getElementById('volume-chart').style.height = volH  + 'px';
+
+  const commonOpts = {
+    layout: { background: { color: '#0f1117' }, textColor: '#888' },
+    grid: { vertLines: { color: '#1e2130' }, horzLines: { color: '#1e2130' } },
+    rightPriceScale: { borderColor: '#2a2d3e' },
+  };
+
+  mainChart = LightweightCharts.createChart(document.getElementById('chart'), {
+    ...commonOpts,
+    crosshair: { mode: LightweightCharts.CrosshairMode.Normal },
+    timeScale: { borderColor: '#2a2d3e', timeVisible: true },
+    width:  document.getElementById('chart').clientWidth,
+    height: mainH,
+  });
+
+  candleSeries = mainChart.addCandlestickSeries({
+    upColor: '#22c55e', downColor: '#ef4444',
+    borderUpColor: '#22c55e', borderDownColor: '#ef4444',
+    wickUpColor:   '#22c55e', wickDownColor:   '#ef4444',
+  });
+
+  volChart = LightweightCharts.createChart(document.getElementById('volume-chart'), {
+    ...commonOpts,
+    timeScale: { borderColor: '#2a2d3e', timeVisible: true, visible: false },
+    width:  document.getElementById('volume-chart').clientWidth,
+    height: volH,
+  });
+
+  volumeSeries = volChart.addHistogramSeries({
+    priceFormat: { type: 'volume' },
+    priceScaleId: '',
+    scaleMargins: { top: 0.1, bottom: 0 },
+  });
+
+  // 크로스헤어 → 통계바
+  mainChart.subscribeCrosshairMove(param => {
+    const d = param.seriesData?.get(candleSeries);
+    if (d) {
+      document.getElementById('s-open').textContent  = fmt(d.open,  normalized);
+      document.getElementById('s-high').textContent  = fmt(d.high,  normalized);
+      document.getElementById('s-low').textContent   = fmt(d.low,   normalized);
+      document.getElementById('s-close').textContent = fmt(d.close, normalized);
+    }
+  });
+
+  // 타임스케일 동기화
+  mainChart.timeScale().subscribeVisibleLogicalRangeChange(r => { if(r) volChart.timeScale().setVisibleLogicalRange(r); });
+  volChart.timeScale().subscribeVisibleLogicalRangeChange(r  => { if(r) mainChart.timeScale().setVisibleLogicalRange(r); });
+}
+
+function timeVal(t, mode) {
+  if (mode === 'daily') return t;
+  return Math.floor(new Date(t).getTime() / 1000);
+}
+
+async function loadStock(ticker) {
+  currentTicker = ticker;
+  document.getElementById('loading').classList.remove('hidden');
+  document.getElementById('h-ticker').textContent = ticker;
+
+  // 시퀀스 정보 로딩
+  if (currentMode === 'sequence') {
+    const sRes = await fetch(`${API}/api/sequences/${ticker}`);
+    const sData = await sRes.json();
+    seqTotal = sData.n_sequences;
+    seqIdx   = Math.min(seqIdx, seqTotal - 1);
+    const slider = document.getElementById('seq-slider');
+    slider.max   = seqTotal - 1;
+    slider.value = seqIdx;
+    document.getElementById('s-seq').textContent = `${seqTotal}개`;
+    updateSeqInfo();
+  }
+
+  const apiMode  = currentMode === 'sequence' ? 'minute' : currentMode;
+  const seqParam = currentMode === 'sequence' ? `&seq=${seqIdx}` : '';
+  const url = `${API}/api/stock/${ticker}?mode=${apiMode}&normalized=${normalized}&trading=${tradingHours}${seqParam}`;
+
+  try {
+    const res = await fetch(url);
+    const d   = await res.json();
+
+    const candles = d.timestamps.map((t, i) => ({
+      time:  timeVal(t, apiMode),
+      open:  d.open[i],  high:  d.high[i],
+      low:   d.low[i],   close: d.close[i],
+    })).filter(c => c.open !== null && c.close !== null);
+
+    const vols = d.timestamps.map((t, i) => ({
+      time:  timeVal(t, apiMode),
+      value: d.volume[i] || 0,
+      color: (d.close[i] >= d.open[i]) ? '#22c55e44' : '#ef444444',
+    })).filter(v => v.value !== null);
+
+    candleSeries.setData(candles);
+    volumeSeries.setData(vols);
+    mainChart.timeScale().fitContent();
+    volChart.timeScale().fitContent();
+
+    // 헤더
+    if (candles.length > 0) {
+      const last  = candles[candles.length - 1];
+      const first = candles[0];
+      const chgPct = ((last.close - first.close) / first.close * 100).toFixed(2);
+      const prefix = normalized ? '' : '$';
+      document.getElementById('h-price').textContent  = prefix + fmt(last.close, normalized);
+      const chgEl = document.getElementById('h-change');
+      chgEl.textContent = (chgPct >= 0 ? '+' : '') + chgPct + '%';
+      chgEl.className   = 'change-big ' + (chgPct >= 0 ? 'up' : 'down');
+
+      document.getElementById('s-ticker').textContent = ticker;
+      document.getElementById('s-open').textContent   = fmt(last.open,  normalized);
+      document.getElementById('s-high').textContent   = fmt(last.high,  normalized);
+      document.getElementById('s-low').textContent    = fmt(last.low,   normalized);
+      document.getElementById('s-close').textContent  = fmt(last.close, normalized);
+      document.getElementById('s-vol').textContent    = fmtVol(d.volume[d.volume.length - 1], normalized);
+      const chgEl2 = document.getElementById('s-chg');
+      chgEl2.textContent = (chgPct >= 0 ? '+' : '') + chgPct + '%';
+      chgEl2.className   = 'stat-value ' + (chgPct >= 0 ? 'up' : 'down');
+    }
+
+    // 정규화 표시
+    document.getElementById('h-norm').style.display = normalized ? '' : 'none';
+
+    // 사이드바 active
+    document.querySelectorAll('.stock-item').forEach(el =>
+      el.classList.toggle('active', el.dataset.ticker === ticker)
+    );
+  } catch(e) {
+    console.error(e);
+  } finally {
+    document.getElementById('loading').classList.add('hidden');
+  }
+}
+
+// ── 모드 ──
+function setMode(mode, btn) {
+  currentMode = mode;
+  document.querySelectorAll('#mode-btns .btn').forEach(b => b.classList.remove('active'));
+  btn.classList.add('active');
+
+  const seqPanel = document.getElementById('seq-panel');
+  seqPanel.classList.toggle('visible', mode === 'sequence');
+  seqIdx = 0;
+
+  loadStock(currentTicker);
+}
+
+function toggleNorm() {
+  normalized = !normalized;
+  const btn = document.getElementById('norm-btn');
+  btn.classList.toggle('toggle-on', normalized);
+  btn.textContent = normalized ? '정규화 ON' : '정규화';
+  loadStock(currentTicker);
+}
+
+function toggleHours() {
+  tradingHours = !tradingHours;
+  const btn = document.getElementById('hours-btn');
+  btn.classList.toggle('toggle-on', tradingHours);
+  btn.textContent = tradingHours ? '거래시간 필터 ON' : '거래시간 필터 OFF';
+  loadStock(currentTicker);
+}
+
+// ── 시퀀스 슬라이더 ──
+let seqDebounce;
+function onSeqSlider(val) {
+  seqIdx = parseInt(val);
+  updateSeqInfo();
+  clearTimeout(seqDebounce);
+  seqDebounce = setTimeout(() => loadStock(currentTicker), 300);
+}
+function moveSeq(delta) {
+  seqIdx = Math.max(0, Math.min(seqTotal - 1, seqIdx + delta));
+  document.getElementById('seq-slider').value = seqIdx;
+  updateSeqInfo();
+  loadStock(currentTicker);
+}
+function updateSeqInfo() {
+  document.getElementById('seq-info').textContent = `#${seqIdx + 1} / ${seqTotal}  (100 타임스텝)`;
+}
+
+// ── 사이드바 ──
+let sidebarCache = [];
+function setSidebarSort(sort, tab) {
+  sidebarSort = sort;
+  document.querySelectorAll('.sidebar-tab').forEach(t => t.classList.remove('active'));
+  tab.classList.add('active');
+  renderSidebar();
+}
+
+function renderSidebar() {
+  let data = [...sidebarCache];
+  if (sidebarSort === 'chg') data.sort((a,b) => b.change_pct - a.change_pct);
+  else if (sidebarSort === 'vol') data.sort((a,b) => b.volume - a.volume);
+  else data.sort((a,b) => a.ticker.localeCompare(b.ticker));
+
+  const list = document.getElementById('stock-list');
+  list.innerHTML = '';
+  data.forEach(d => {
+    const el = document.createElement('div');
+    el.className = 'stock-item' + (d.ticker === currentTicker ? ' active' : '');
+    el.dataset.ticker = d.ticker;
+    const up = d.change_pct >= 0;
+    el.innerHTML = `
+      <span class="ticker">${d.ticker}</span>
+      <div style="text-align:right">
+        <div class="chg ${up ? 'up' : 'down'}">${up ? '+' : ''}${d.change_pct.toFixed(1)}%</div>
+        <div class="seq-count">${d.n_sequences}seq</div>
+      </div>`;
+    el.onclick = () => loadStock(d.ticker);
+    list.appendChild(el);
+  });
+}
+
+async function buildSidebar() {
+  const res  = await fetch(`${API}/api/summary`);
+  const data = await res.json();
+  sidebarCache = data;
+  document.getElementById('ticker-count').textContent = data.length + '개 종목';
+  renderSidebar();
+}
+
+// ── 검색 ──
+async function buildSearch() {
+  const res  = await fetch(`${API}/api/tickers`);
+  allTickers = await res.json();
+
+  const input    = document.getElementById('ticker-input');
+  const dropdown = document.getElementById('ticker-dropdown');
+
+  input.addEventListener('input', () => {
+    const q = input.value.toUpperCase();
+    dropdown.innerHTML = '';
+    if (!q) { dropdown.style.display = 'none'; return; }
+    const matches = allTickers.filter(t => t.includes(q)).slice(0, 20);
+    if (!matches.length) { dropdown.style.display = 'none'; return; }
+    matches.forEach(t => {
+      const el = document.createElement('div');
+      el.className = 'item';
+      el.textContent = t;
+      el.onclick = () => { input.value = ''; dropdown.style.display = 'none'; loadStock(t); };
+      dropdown.appendChild(el);
+    });
+    dropdown.style.display = 'block';
+  });
+  input.addEventListener('keydown', e => {
+    if (e.key === 'Enter') {
+      const q = input.value.toUpperCase();
+      if (allTickers.includes(q)) { input.value = ''; dropdown.style.display = 'none'; loadStock(q); }
+    }
+  });
+  document.addEventListener('click', e => {
+    if (!input.contains(e.target)) dropdown.style.display = 'none';
+  });
+}
+
+// ── 리사이즈 ──
+window.addEventListener('resize', () => {
+  if (mainChart) {
+    mainChart.applyOptions({ width: document.getElementById('chart').clientWidth });
+    volChart.applyOptions({ width: document.getElementById('volume-chart').clientWidth });
+  }
+});
+
+// ── 초기화 ──
+async function init() {
+  initCharts();
+  await Promise.all([buildSearch(), buildSidebar()]);
+  loadStock('AAPL');
+}
+init();
+</script>
+</body>
+</html>
